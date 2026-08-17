@@ -1,0 +1,16 @@
+{
+  "name": "@deepseek-ai/dsh-desktop",
+  "description": "Desktop shell for the DeepSeek Harness Web GUI: a Tauri window that hosts the dsh web service and renders the exact same SPA and plugin registry the browser edition serves",
+  "version": "0.1.0-rc.5",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "icon": "tauri icon"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.9.0"
+  }
+}

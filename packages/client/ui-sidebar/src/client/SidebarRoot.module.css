@@ -241,8 +241,10 @@
   padding-left: 0;
 }
 
-/* Footer seats: additive actions stack above Settings. Each occupant owns its
-   button geometry and hover chrome. */
+/* Footer seats: additive actions stack above Settings, each action on its own
+   full-width row (column stack), so an occupant that hard-codes a full-width
+   badge fills the row instead of being squeezed into a shared line. Each
+   occupant owns its button geometry and hover chrome. */
 .footArea {
   flex: none;
   display: flex;
@@ -258,6 +260,7 @@
 
 .footerActions {
   display: flex;
+  flex-direction: column;
 }
 
 .collapsed .footArea {
@@ -269,6 +272,12 @@
   display: flex;
   justify-content: center;
   width: auto;
+}
+
+/* Rail entries drop their wide margins (each becomes a bare 36px circle), so
+   the shell spaces the stacked circles itself. */
+.collapsed .footerActions {
+  gap: 4px;
 }
 
 @media (prefers-reduced-motion: reduce) {
