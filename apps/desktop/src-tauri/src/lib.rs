@@ -31,6 +31,47 @@ use service::{ServiceError, ServiceHandle};
 /// Restart backoff between an unexpected exit and the respawn.
 const RESTART_DELAY: Duration = Duration::from_secs(1);
 
+/// File recording the spawned service pid. Cleanup on next launch reaps a
+/// service orphaned by a hard shell kill (SIGKILL/crash): process-group
+/// shutdown covers the graceful path only.
+const SERVICE_PID_FILE: &str = "dsh-desktop-service.pid";
+
+/// The pid file's location under `~/.dsh`.
+fn service_pid_path(home: &PathBuf) -> PathBuf {
+    home.join(".dsh").join(SERVICE_PID_FILE)
+}
+
+/// Kill any service left over from a previous run whose pid file survives
+/// (the shell was hard-killed before `quit_shell` could stop it). Signals the
+/// recorded process group — the same group `spawn_service` created.
+fn cleanup_stale_service(home: &PathBuf) {
+    let path = service_pid_path(home);
+    let Ok(raw) = fs::read_to_string(&path) else { return };
+    let Ok(pid) = raw.trim().parse::<i32>() else {
+        let _ = fs::remove_file(&path);
+        return
+    };
+    if pid > 0 {
+        unsafe { libc::kill(-pid, libc::SIGTERM) };
+        unsafe { libc::kill(-pid, libc::SIGKILL) };
+    }
+    let _ = fs::remove_file(&path);
+}
+
+/// Record the spawned service pid so a future launch can reap it if this run
+/// dies without a graceful stop.
+fn record_service_pid(home: &PathBuf, pid: u32) {
+    let path = service_pid_path(home);
+    if fs::write(&path, format!("{pid}\n")).is_ok() {
+        println!("dsh-desktop: recorded service pid {pid}");
+    }
+}
+
+/// Drop the pid file after a graceful stop.
+fn clear_service_pid(home: &PathBuf) {
+    let _ = fs::remove_file(service_pid_path(home));
+}
+
 /// Desktop-environment adapter injected after every page load. The WebView's
 /// content area already sits below the native title bar (innerHeight excludes
 /// it), so plugins that pin controls to the viewport top — like the
@@ -90,7 +131,7 @@ const DESKTOP_SETTINGS_BLOCK: &str = "\ndsh-better-sidebar:\n  openByDefault: fa
 
 /// Ensure the desktop prefs defaults exist in `~/.dsh/settings.yaml`. A no-op
 /// when the namespace is already present or the file is unreadable.
-fn ensure_desktop_settings(home: PathBuf) {
+fn ensure_desktop_settings(home: &PathBuf) {
     let path = home.join(".dsh").join(DSH_SETTINGS_FILE);
     let Ok(content) = fs::read_to_string(&path) else { return };
     if content.contains("dsh-better-sidebar:") { return }
@@ -211,6 +252,8 @@ fn quit_shell(app: &AppHandle) {
     if let Some(handle) = handle {
         service::stop_service(handle.pid);
     }
+    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+    clear_service_pid(&home);
     app.exit(0);
 }
 
@@ -249,7 +292,11 @@ pub fn run() {
             // default, title-bar compatible toggle). Runs before the service
             // boots so the freshly spawned server reads them.
             let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
-            ensure_desktop_settings(home);
+            ensure_desktop_settings(&home);
+            // Reap any service orphaned by a hard-killed previous run before
+            // spawning a fresh one — two instances writing the same
+            // ~/.dsh/sessions logs corrupt the session file (seq gaps).
+            cleanup_stale_service(&home);
 
             let handle = app.handle().clone();
 
@@ -280,6 +327,7 @@ pub fn run() {
             // Launch the service and watch it.
             match launch_service(&handle) {
                 Ok((service_handle, exit_rx)) => {
+                    record_service_pid(&home, service_handle.pid);
                     if let Some(url) = service_handle.url.clone() {
                         navigate_main(&handle, &url);
                     }

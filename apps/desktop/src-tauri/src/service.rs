@@ -14,6 +14,7 @@
 //! bundle embeds — see apps/desktop/README.md for the resource layout.
 
 use std::io::{BufRead, BufReader};
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -117,6 +118,12 @@ fn drain_stdout(mut stdout: impl BufRead, ready_tx: Sender<String>) {
 
 /// Spawn the service, drain its output, and wait for readiness.
 ///
+/// The child is spawned in its own process group (Unix `process_group(0)`),
+/// so a shutdown can signal the whole group — dsh web owns its own children
+/// (shells, workers) and a pid-only kill would orphan them. Orphans keep
+/// writing the shared `~/.dsh/sessions` logs and corrupt the session file
+/// (seq gaps) when a later instance runs against the same profile.
+///
 /// The child is intentionally not reaped here: the caller keeps the returned
 /// handle for shutdown and receives `exit_code` when the process actually
 /// ends, so a restart decision follows the real exit.
@@ -124,6 +131,7 @@ pub fn spawn_service(mut command: Command) -> Result<(ServiceHandle, Receiver<Op
     let mut child: Child = command
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
+        .process_group(0)
         .spawn()?;
     let pid = child.id();
     let stdout = child.stdout.take().expect("stdout was piped");
@@ -167,20 +175,46 @@ fn wait_for_ready(ready_rx: &Receiver<String>, timeout: Duration) -> Result<Stri
     }
 }
 
-/// Gracefully stop a running service: SIGTERM, then SIGKILL after the grace
-/// period. A no-op when the pid no longer exists.
+/// Signal one pid, returning whether the signal was delivered.
+fn signal(pid: i32, sig: i32) -> bool {
+    unsafe { libc::kill(pid, sig) == 0 }
+}
+
+/// Whether a pid (or process group, when negative) still exists.
+fn alive(pid: i32) -> bool {
+    unsafe { libc::kill(pid, 0) == 0 }
+}
+
+/// Gracefully stop a running service and its whole process group: SIGTERM to
+/// the group, then SIGKILL after the grace period. A no-op when the process
+/// is already gone.
 pub fn stop_service(pid: u32) {
-    if unsafe { libc::kill(pid as i32, libc::SIGTERM) } == 0 {
+    let pid = pid as i32;
+    // Negative pid targets the process group the child was spawned into.
+    let group = -pid;
+    if signal(group, libc::SIGTERM) {
         let deadline = Instant::now() + TERM_GRACE;
         while Instant::now() < deadline {
-            // A zero pid cannot be signalled by kill(0) semantics here; wait
-            // for the process to disappear via kill(pid, 0).
-            if unsafe { libc::kill(pid as i32, 0) } != 0 {
+            if !alive(group) && !alive(pid) {
                 return;
             }
             thread::sleep(Duration::from_millis(100));
         }
-        let _ = unsafe { libc::kill(pid as i32, libc::SIGKILL) };
+        let _ = unsafe { libc::kill(group, libc::SIGKILL) };
+        let _ = unsafe { libc::kill(pid, libc::SIGKILL) };
+        return;
+    }
+    // No process group (spawned before the group change, or already dead):
+    // fall back to signalling the pid directly.
+    if signal(pid, libc::SIGTERM) {
+        let deadline = Instant::now() + TERM_GRACE;
+        while Instant::now() < deadline {
+            if !alive(pid) {
+                return;
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+        let _ = unsafe { libc::kill(pid, libc::SIGKILL) };
     }
 }
 
