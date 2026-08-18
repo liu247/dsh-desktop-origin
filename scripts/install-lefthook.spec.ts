@@ -195,9 +195,10 @@ function runInstaller(
   fixture: Fixture,
   root: string,
   extraEnv: NodeJS.ProcessEnv = {},
+  installerPath: string = installer,
 ): Promise<CommandResult> {
   return new Promise((resolveResult, reject) => {
-    const child = spawn(process.execPath, [installer], {
+    const child = spawn(process.execPath, [installerPath], {
       cwd: root,
       env: { ...fixture.env, ...extraEnv },
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -239,6 +240,23 @@ describe('worktree-local Lefthook installer', { timeout: 15_000 }, () => {
       ]).status).toBe(1)
     })
   }
+
+  it('skips hook installation when the lefthook package cannot be resolved', async () => {
+    const fixture = createFixture()
+    // A copy of the installer outside the checkout cannot resolve the lefthook
+    // devDependency, mirroring installs that skip devDependencies.
+    const relocatedInstaller = join(fixture.container, 'install-lefthook.mjs')
+    writeFileSync(relocatedInstaller, readFileSync(installer, 'utf8'))
+
+    const result = await runInstaller(fixture, fixture.main, {}, relocatedInstaller)
+
+    expect(result.status, result.stderr).toBe(0)
+    expect(git(fixture, fixture.main, ['config', '--get', 'core.repositoryFormatVersion'])).toBe('0')
+    expect(existsSync(hooksPath(fixture, fixture.main))).toBe(false)
+    expect(gitResult(fixture, fixture.main, [
+      'config', '--get', 'merge.dsh-translation-pairing.driver',
+    ]).status).toBe(1)
+  })
 
   it('isolates main and linked worktrees without changing legacy common hooks', async () => {
     const fixture = createFixture()
