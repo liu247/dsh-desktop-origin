@@ -73,7 +73,10 @@ pub fn dev_service_command() -> Result<Command, ServiceError> {
         .and_then(Path::parent)
         .ok_or_else(|| std::io::Error::other("CARGO_MANIFEST_DIR has no repo root above it"))?;
     let mut cmd = Command::new("node");
-    cmd.args(["--import", "tsx/esm", "apps/cli/src/bin.ts", "web", "--port", DESKTOP_PORT])
+    // --no-open: rc.8's web runtime opens the default browser after startup
+    // (openBrowser defaults true); the desktop shell renders its own WebView
+    // window and must not hijack the user's browser.
+    cmd.args(["--import", "tsx/esm", "apps/cli/src/bin.ts", "web", "--port", DESKTOP_PORT, "--no-open"])
         .current_dir(repo);
     Ok(cmd)
 }
@@ -89,6 +92,9 @@ pub fn bundled_service_command(resource_dir: &Path) -> Result<Command, ServiceEr
         .arg("web")
         .arg("--port")
         .arg(DESKTOP_PORT)
+        // --no-open: the shell renders its own window; rc.8 would otherwise
+        // hand off to the default browser.
+        .arg("--no-open")
         .current_dir(resource_dir.join("dsh"));
     Ok(cmd)
 }
