@@ -91,7 +91,14 @@ web` serves them).
 - **Service lifecycle**: `src-tauri/src/service.rs` owns the child process —
   stdout drain, graceful stop (SIGTERM, SIGKILL after 3s), exit-code reporting.
 - **Window**: closing hides to the tray; the tray menu shows and quits.
-  Quitting stops the service before the process exits.
+  Quitting stops the service before the process exits. macOS Cmd+Q and the
+  system Quit menu run the same cleanup through the `ExitRequested` event, so
+  no quit path leaves the spawned service running.
+- **Stale-service reaping**: on launch the shell reaps a service orphaned by
+  a hard kill. The recorded pid file is one source; when it is missing, the
+  shell sweeps the desktop port and kills any process whose command line
+  matches the spawned `dsh web` service, so a hard-quit cannot wedge the
+  port and leave the next launch spinning on the loading screen.
 - **Restart**: an unexpected service exit restarts it once (1s backoff) and
   re-navigates the window.
 

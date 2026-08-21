@@ -76,8 +76,16 @@ pub fn dev_service_command() -> Result<Command, ServiceError> {
     // --no-open: rc.8's web runtime opens the default browser after startup
     // (openBrowser defaults true); the desktop shell renders its own WebView
     // window and must not hijack the user's browser.
-    cmd.args(["--import", "tsx/esm", "apps/cli/src/bin.ts", "web", "--port", DESKTOP_PORT, "--no-open"])
-        .current_dir(repo);
+    cmd.args([
+        "--import",
+        "tsx/esm",
+        "apps/cli/src/bin.ts",
+        "web",
+        "--port",
+        DESKTOP_PORT,
+        "--no-open",
+    ])
+    .current_dir(repo);
     Ok(cmd)
 }
 
@@ -133,7 +141,9 @@ fn drain_stdout(mut stdout: impl BufRead, ready_tx: Sender<String>) {
 /// The child is intentionally not reaped here: the caller keeps the returned
 /// handle for shutdown and receives `exit_code` when the process actually
 /// ends, so a restart decision follows the real exit.
-pub fn spawn_service(mut command: Command) -> Result<(ServiceHandle, Receiver<Option<i32>>), ServiceError> {
+pub fn spawn_service(
+    mut command: Command,
+) -> Result<(ServiceHandle, Receiver<Option<i32>>), ServiceError> {
     let mut child: Child = command
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
@@ -154,7 +164,10 @@ pub fn spawn_service(mut command: Command) -> Result<(ServiceHandle, Receiver<Op
 
     let url = wait_for_ready(&ready_rx, READY_TIMEOUT)?;
     Ok((
-        ServiceHandle { pid, url: Some(url) },
+        ServiceHandle {
+            pid,
+            url: Some(url),
+        },
         exited_rx,
     ))
 }
@@ -232,7 +245,10 @@ mod tests {
     fn ready_prefix_parses_url_line() {
         let line = "dsh web: http://127.0.0.1:51234 (LAN: http://192.168.1.5:51234)";
         let rest = line.strip_prefix(READY_PREFIX).unwrap();
-        assert_eq!(rest.split_whitespace().next(), Some("http://127.0.0.1:51234"));
+        assert_eq!(
+            rest.split_whitespace().next(),
+            Some("http://127.0.0.1:51234")
+        );
     }
 
     #[test]
