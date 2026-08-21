@@ -24,6 +24,16 @@ packages:
 # builds must resolve those matching names to this workspace's pinned sources.
 linkWorkspacePackages: true
 
+# pnpm 11 defaults verifyDepsBeforeRun=install: every pnpm run/exec first
+# checks node_modules against the lockfile and auto-installs when out of sync.
+# That auto-install reuses the dev/production flags recorded in workspace
+# state, so a single production-mode install poisons it and the next auto
+# install runs `pnpm install --production`, wiping devDependencies (seen with
+# apps/desktop's @tauri-apps/cli). Install is explicit here; never automatic.
+# Must be top-level camelCase: .npmrc ignores the key (only auth/network keys
+# are readable there) and kebab-case is skipped by the isCamelCase gate.
+verifyDepsBeforeRun: false
+
 overrides:
   '@deepseek-ai/cosmokit': 'link:vendor/cosmokit'
   '@deepseek-ai/schemastery': 'link:vendor/schemastery'
